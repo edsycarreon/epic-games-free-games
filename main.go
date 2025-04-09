@@ -70,6 +70,28 @@ query searchStoreQuery(
         productSlug
         urlSlug
         url
+        offerMappings {
+          pageSlug
+          pageType
+        }
+        catalogNs {
+          mappings(pageType: "productHome") {
+            pageSlug
+            pageType
+          }
+        }
+        linkedOffer {
+          effectiveDate
+          customAttributes{
+            key
+            value
+          }
+        }
+        categories {
+          path
+        }
+        namespace
+        id
         price(country: $country) @include(if: $withPrice) {
           totalPrice {
             fmtPrice(locale: $locale) {
@@ -128,6 +150,28 @@ type GraphQLResponse struct {
 					ProductSlug string `json:"productSlug"`
 					URL         string `json:"url"`
 					UrlSlug     string `json:"urlSlug"`
+					OfferMappings []struct {
+						PageSlug string `json:"pageSlug"`
+						PageType string `json:"pageType"`
+					} `json:"offerMappings"`
+					CatalogNs struct {
+						Mappings []struct {
+							PageSlug string `json:"pageSlug"`
+							PageType string `json:"pageType"`
+						} `json:"mappings"`
+					} `json:"catalogNs"`
+					LinkedOffer struct {
+						EffectiveDate string `json:"effectiveDate"`
+						CustomAttributes []struct {
+							Key   string `json:"key"`
+							Value string `json:"value"`
+						} `json:"customAttributes"`
+					} `json:"linkedOffer"`
+					Categories []struct {
+						Path string `json:"path"`
+					} `json:"categories"`
+					Namespace string `json:"namespace"`
+					ID        string `json:"id"`
 					Price       struct {
 						TotalPrice struct {
 							FmtPrice struct {
@@ -478,14 +522,31 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 
-		// Construct URL
-		if element.URL != "" {
-			game.URL = element.URL
-		} else if element.ProductSlug != "" {
-			game.URL = fmt.Sprintf("https://store.epicgames.com/en-US/p/%s", element.ProductSlug)
-		} else if element.UrlSlug != "" {
-			game.URL = fmt.Sprintf("https://store.epicgames.com/en-US/p/%s", element.UrlSlug)
+		// Construct URL with all available information
+		// Remove debugging logs but keep the logic
+			
+		// Check for page slug in offer mappings
+		pageSlug := ""
+		if len(element.OfferMappings) > 0 {
+			for _, mapping := range element.OfferMappings {
+				if mapping.PageSlug != "" {
+					pageSlug = mapping.PageSlug
+					break
+				}
+			}
 		}
+		
+		// Check catalog mappings as another source
+		if pageSlug == "" && len(element.CatalogNs.Mappings) > 0 {
+			for _, mapping := range element.CatalogNs.Mappings {
+				if mapping.PageSlug != "" {
+					pageSlug = mapping.PageSlug
+					break
+				}
+			}
+		}
+
+		game.URL = fmt.Sprintf("https://store.epicgames.com/en-US/p/%s", pageSlug)
 
 		// Check if it's currently free
 		isCurrentlyFree := false
@@ -641,4 +702,35 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 	}
 
 	return games, nil
+}
+
+// checkURL verifies if a URL is valid by making a HEAD request
+func checkURL(url string) bool {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// Allow up to 10 redirects
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
+	
+	req, err := http.NewRequest("HEAD", url, nil)
+	if err != nil {
+		return false
+	}
+	
+	// Set user agent to avoid being blocked
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	
+	// Status codes 200-399 are considered valid
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
 }
