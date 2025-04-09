@@ -8,9 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Game represents a free game from Epic Games Store
@@ -161,19 +164,87 @@ type GraphQLResponse struct {
 	} `json:"data"`
 }
 
+// getEnvString returns the value of the environment variable or the default value if not set
+func getEnvString(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+// getEnvInt returns the integer value of the environment variable or the default value if not set
+func getEnvInt(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		log.Printf("Warning: Environment variable %s is not a valid integer, using default: %d\n", key, defaultValue)
+		return defaultValue
+	}
+	return intValue
+}
+
 func main() {
-	// Define command-line flags
-	port := flag.Int("port", 8080, "Port for the API server to listen on")
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("Warning: Error loading .env file:", err)
+	}
+	
+	// Define command-line flags with environment variable defaults
+	port := flag.Int("port", getEnvInt("PORT", 8080), "Port for the API server to listen on")
+	
+	// Discord webhook configuration
+	discordWebhook := flag.String("discord-webhook", os.Getenv("DISCORD_WEBHOOK_URL"), "Discord webhook URL for notifications")
+	
+	
+	// Region and locale configuration
+	countryCode := flag.String("country", getEnvString("COUNTRY_CODE", "PH"), "Country code for Epic Games Store")
+	locale := flag.String("locale", getEnvString("LOCALE", "en-PH"), "Locale for Epic Games Store")
+	timezone := flag.String("timezone", getEnvString("TIMEZONE", "Asia/Manila"), "Timezone for date/time formatting")
+	
 	flag.Parse()
 
 	// Set up API routes
-	http.HandleFunc("/api/free-games", freeGamesHandler)
+	http.HandleFunc("/api/free-games", func(w http.ResponseWriter, r *http.Request) {
+		freeGamesHandler(w, r, *countryCode, *locale, *timezone, *discordWebhook)
+	})
 	http.HandleFunc("/", indexHandler)
+	
+	// Set up Discord webhook notification route (for manual triggering)
+	http.HandleFunc("/notify", func(w http.ResponseWriter, r *http.Request) {
+		if *discordWebhook == "" {
+			http.Error(w, "Discord webhook URL not configured", http.StatusInternalServerError)
+			return
+		}
+		
+		// Get free games
+		games, err := fetchFreeGames(*countryCode, *locale, true, *timezone)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error fetching games: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		// Send notification to Discord
+		err = SendDiscordNotification(*discordWebhook, games)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error sending Discord notification: %v", err), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": fmt.Sprintf("Notification sent for %d games", len(games)),
+		})
+	})
 
 	// Start the server
-	serverAddr := fmt.Sprintf(":%d", *port)
-	log.Printf("Starting server on %s", serverAddr)
-	log.Fatal(http.ListenAndServe(serverAddr, nil))
+	fmt.Printf("Epic Games API server listening on port %d...\n", *port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
 
 // indexHandler serves a simple HTML page with information about the API
@@ -269,30 +340,28 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // freeGamesHandler handles requests to the /api/free-games endpoint
-func freeGamesHandler(w http.ResponseWriter, r *http.Request) {
+func freeGamesHandler(w http.ResponseWriter, r *http.Request, countryCode, locale, timezone, 
+					  webhookURL string) {
 	// Set default values
-	countryCode := "PH"
-	locale := "en-PH"
 	includeUpcoming := true
-	timezone := "Asia/Manila" // Default to Philippine timezone
+	sendNotification := false // Flag to determine if we should send Discord notification
 
 	// Get query parameters
-	if country := r.URL.Query().Get("country"); country != "" {
-		countryCode = country
-	}
-
-	if localeParam := r.URL.Query().Get("locale"); localeParam != "" {
-		locale = localeParam
-	}
-
 	if upcoming := r.URL.Query().Get("upcoming"); upcoming != "" {
 		if upcomingBool, err := strconv.ParseBool(upcoming); err == nil {
 			includeUpcoming = upcomingBool
 		}
 	}
 	
-	if tz := r.URL.Query().Get("timezone"); tz != "" {
-		timezone = tz
+	// Check if this request should trigger a notification
+	if notify := r.URL.Query().Get("notify"); notify != "" {
+		if notifyBool, err := strconv.ParseBool(notify); err == nil {
+			// If webhook URL is available, Discord notifications are enabled
+			sendNotification = notifyBool && webhookURL != ""
+		}
+	} else {
+		// By default, send notification if webhook URL is available
+		sendNotification = webhookURL != ""
 	}
 
 	// Get free games
@@ -315,6 +384,21 @@ func freeGamesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Send Discord notification if requested and enabled
+	if sendNotification {
+		if webhookURL != "" {
+	
+			err := SendDiscordNotification(webhookURL, games)
+			if err != nil {
+				log.Printf("Error sending Discord notification: %v", err)
+			} else {
+				log.Printf("Discord notification sent for %d games", len(games))
+			}
+		} else {
+			log.Printf("Discord webhook URL not configured")
+		}
+	}
+
 	// Return successful response
 	response := APIResponse{
 		Success: true,
@@ -327,6 +411,7 @@ func freeGamesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(jsonData)
 }
 
+// fetchFreeGames gets free games from Epic Games Store
 func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone string) ([]Game, error) {
 	// Prepare GraphQL request
 	variables := map[string]interface{}{
