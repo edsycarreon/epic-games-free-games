@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/robfig/cron/v3"
 )
 
 // Game represents a free game from Epic Games Store
@@ -231,6 +232,20 @@ func getEnvInt(key string, defaultValue int) int {
 	return intValue
 }
 
+// getEnvBool returns the boolean value of the environment variable or the default value if not set
+func getEnvBool(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	boolValue, err := strconv.ParseBool(value)
+	if err != nil {
+		log.Printf("Warning: Environment variable %s is not a valid boolean, using default: %v\n", key, defaultValue)
+		return defaultValue
+	}
+	return boolValue
+}
+
 func main() {
 	// Load .env file
 	err := godotenv.Load()
@@ -249,6 +264,10 @@ func main() {
 	countryCode := flag.String("country", getEnvString("COUNTRY_CODE", "PH"), "Country code for Epic Games Store")
 	locale := flag.String("locale", getEnvString("LOCALE", "en-PH"), "Locale for Epic Games Store")
 	timezone := flag.String("timezone", getEnvString("TIMEZONE", "Asia/Manila"), "Timezone for date/time formatting")
+	
+	// Cron job configuration
+	enableCron := flag.Bool("enable-cron", getEnvBool("ENABLE_CRON", false), "Enable built-in cron job to check for free games")
+	cronSchedule := flag.String("cron-schedule", getEnvString("CRON_SCHEDULE", "0 0 0 * * *"), "Cron schedule expression for checking free games")
 	
 	flag.Parse()
 
@@ -285,6 +304,11 @@ func main() {
 			"message": fmt.Sprintf("Notification sent for %d games", len(games)),
 		})
 	})
+
+	// Set up cron job if enabled
+	if *enableCron {
+		setupCronJob(*cronSchedule, *countryCode, *locale, *timezone, *discordWebhook)
+	}
 
 	// Start the server
 	fmt.Printf("Epic Games API server listening on port %d...\n", *port)
@@ -733,4 +757,49 @@ func checkURL(url string) bool {
 	
 	// Status codes 200-399 are considered valid
 	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
+
+// setupCronJob configures and starts a cron job to check for free games on a schedule
+func setupCronJob(schedule, countryCode, locale, timezone, webhookURL string) {
+	if webhookURL == "" {
+		log.Println("Warning: Discord webhook URL not configured. Cron job will run but no notifications will be sent.")
+	}
+
+	c := cron.New(cron.WithSeconds())
+	
+	// Log cron job setup
+	log.Printf("Setting up cron job with schedule: %s", schedule)
+	
+	// Add the cron job
+	_, err := c.AddFunc(schedule, func() {
+		log.Println("Running scheduled free games check...")
+		
+		// Get free games
+		games, err := fetchFreeGames(countryCode, locale, true, timezone)
+		if err != nil {
+			log.Printf("Error fetching free games: %v", err)
+			return
+		}
+		
+		log.Printf("Found %d free game(s)", len(games))
+		
+		// Send notification to Discord if webhook URL is configured
+		if webhookURL != "" {
+			err = SendDiscordNotification(webhookURL, games)
+			if err != nil {
+				log.Printf("Error sending Discord notification: %v", err)
+			} else {
+				log.Printf("Discord notification sent for %d games", len(games))
+			}
+		}
+	})
+	
+	if err != nil {
+		log.Printf("Error setting up cron job: %v", err)
+		return
+	}
+	
+	// Start the cron scheduler in a separate goroutine
+	c.Start()
+	log.Println("Cron scheduler started")
 }
