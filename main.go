@@ -30,7 +30,6 @@ type Game struct {
 	Publisher     string `json:"publisher,omitempty"`
 }
 
-// API response structure
 type APIResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
@@ -38,7 +37,6 @@ type APIResponse struct {
 	Data    []Game `json:"data"`
 }
 
-// GraphQL query for free games
 const freeGamesQuery = `
 query searchStoreQuery(
   $category: String,
@@ -209,7 +207,6 @@ type GraphQLResponse struct {
 	} `json:"data"`
 }
 
-// getEnvString returns the value of the environment variable or the default value if not set
 func getEnvString(key, defaultValue string) string {
 	value := os.Getenv(key)
 	if value == "" {
@@ -218,7 +215,6 @@ func getEnvString(key, defaultValue string) string {
 	return value
 }
 
-// getEnvInt returns the integer value of the environment variable or the default value if not set
 func getEnvInt(key string, defaultValue int) int {
 	value := os.Getenv(key)
 	if value == "" {
@@ -232,7 +228,6 @@ func getEnvInt(key string, defaultValue int) int {
 	return intValue
 }
 
-// getEnvBool returns the boolean value of the environment variable or the default value if not set
 func getEnvBool(key string, defaultValue bool) bool {
 	value := os.Getenv(key)
 	if value == "" {
@@ -253,25 +248,19 @@ func main() {
 		log.Println("Warning: Error loading .env file:", err)
 	}
 	
-	// Define command-line flags with environment variable defaults
 	port := flag.Int("port", getEnvInt("PORT", 8080), "Port for the API server to listen on")
 	
-	// Discord webhook configuration
 	discordWebhook := flag.String("discord-webhook", os.Getenv("DISCORD_WEBHOOK_URL"), "Discord webhook URL for notifications")
 	
-	
-	// Region and locale configuration
 	countryCode := flag.String("country", getEnvString("COUNTRY_CODE", "PH"), "Country code for Epic Games Store")
 	locale := flag.String("locale", getEnvString("LOCALE", "en-PH"), "Locale for Epic Games Store")
 	timezone := flag.String("timezone", getEnvString("TIMEZONE", "Asia/Manila"), "Timezone for date/time formatting")
 	
-	// Cron job configuration
 	enableCron := flag.Bool("enable-cron", getEnvBool("ENABLE_CRON", false), "Enable built-in cron job to check for free games")
 	cronSchedule := flag.String("cron-schedule", getEnvString("CRON_SCHEDULE", "0 0 0 * * *"), "Cron schedule expression for checking free games")
 	
 	flag.Parse()
 
-	// Set up API routes
 	http.HandleFunc("/api/free-games", func(w http.ResponseWriter, r *http.Request) {
 		freeGamesHandler(w, r, *countryCode, *locale, *timezone, *discordWebhook)
 	})
@@ -310,12 +299,10 @@ func main() {
 		setupCronJob(*cronSchedule, *countryCode, *locale, *timezone, *discordWebhook)
 	}
 
-	// Start the server
 	fmt.Printf("Epic Games API server listening on port %d...\n", *port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", *port), nil))
 }
 
-// indexHandler serves a simple HTML page with information about the API
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -407,7 +394,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, html)
 }
 
-// freeGamesHandler handles requests to the /api/free-games endpoint
 func freeGamesHandler(w http.ResponseWriter, r *http.Request, countryCode, locale, timezone, 
 					  webhookURL string) {
 	// Set default values
@@ -424,22 +410,17 @@ func freeGamesHandler(w http.ResponseWriter, r *http.Request, countryCode, local
 	// Check if this request should trigger a notification
 	if notify := r.URL.Query().Get("notify"); notify != "" {
 		if notifyBool, err := strconv.ParseBool(notify); err == nil {
-			// If webhook URL is available, Discord notifications are enabled
 			sendNotification = notifyBool && webhookURL != ""
 		}
 	} else {
-		// By default, send notification if webhook URL is available
 		sendNotification = webhookURL != ""
 	}
 
-	// Get free games
 	games, err := fetchFreeGames(countryCode, locale, includeUpcoming, timezone)
 	
-	// Prepare response
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Handle errors
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		response := APIResponse{
@@ -452,7 +433,6 @@ func freeGamesHandler(w http.ResponseWriter, r *http.Request, countryCode, local
 		return
 	}
 
-	// Send Discord notification if requested and enabled
 	if sendNotification {
 		if webhookURL != "" {
 	
@@ -467,21 +447,17 @@ func freeGamesHandler(w http.ResponseWriter, r *http.Request, countryCode, local
 		}
 	}
 
-	// Return successful response
 	response := APIResponse{
 		Success: true,
 		Count:   len(games),
 		Data:    games,
 	}
 	
-	// Return pretty JSON for better readability
 	jsonData, _ := json.MarshalIndent(response, "", "  ")
 	w.Write(jsonData)
 }
 
-// fetchFreeGames gets free games from Epic Games Store
 func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone string) ([]Game, error) {
-	// Prepare GraphQL request
 	variables := map[string]interface{}{
 		"category": "games/edition/base|bundles/games|editors",
 		"count":    100,
@@ -499,17 +475,14 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 		return nil, fmt.Errorf("error marshaling request: %v", err)
 	}
 
-	// Create HTTP request
 	req, err := http.NewRequest("POST", "https://graphql.epicgames.com/graphql", bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 
-	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
-	// Send request
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -517,19 +490,16 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 	}
 	defer resp.Body.Close()
 
-	// Check response status
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("bad status: %d, response: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Parse response
 	var graphQLResp GraphQLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&graphQLResp); err != nil {
 		return nil, fmt.Errorf("error decoding response: %v", err)
 	}
 
-	// Convert to Game structs
 	var games []Game
 	for _, element := range graphQLResp.Data.Catalog.SearchStore.Elements {
 		game := Game{
@@ -538,7 +508,6 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			Publisher:   element.Seller.Name,
 		}
 
-		// Get the thumbnail image
 		for _, img := range element.KeyImages {
 			if img.Type == "Thumbnail" || img.Type == "DieselGameBox" {
 				game.ImageURL = img.URL
@@ -546,10 +515,6 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 
-		// Construct URL with all available information
-		// Remove debugging logs but keep the logic
-			
-		// Check for page slug in offer mappings
 		pageSlug := ""
 		if len(element.OfferMappings) > 0 {
 			for _, mapping := range element.OfferMappings {
@@ -560,7 +525,6 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 		
-		// Check catalog mappings as another source
 		if pageSlug == "" && len(element.CatalogNs.Mappings) > 0 {
 			for _, mapping := range element.CatalogNs.Mappings {
 				if mapping.PageSlug != "" {
@@ -572,36 +536,26 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 
 		game.URL = fmt.Sprintf("https://store.epicgames.com/en-US/p/%s", pageSlug)
 
-		// Check if it's currently free
 		isCurrentlyFree := false
 		hasUpcomingFree := false
 		
-		// Format dates to be more readable and convert to specified timezone
 		formatDate := func(dateStr string) string {
-			// Parse the date string (usually in RFC3339 format)
 			t, err := time.Parse(time.RFC3339, dateStr)
 			if err != nil {
-				// If we can't parse, return the original string
 				return dateStr
 			}
 			
-			// Try to load the specified timezone
 			location, err := time.LoadLocation(timezone)
 			if err != nil {
-				// If the timezone is invalid, try to parse it as a UTC offset
 				if strings.HasPrefix(timezone, "UTC") || strings.HasPrefix(timezone, "GMT") {
-					// Try to extract offset
 					offsetStr := strings.TrimPrefix(strings.TrimPrefix(timezone, "UTC"), "GMT")
 					if offsetStr == "" {
-						// Just UTC+0
 						location = time.UTC
 					} else {
-						// Parse hours offset
 						offsetHours := 0
 						if _, err := fmt.Sscanf(offsetStr, "%d", &offsetHours); err == nil {
 							location = time.FixedZone(timezone, offsetHours*60*60)
 						} else {
-							// Default to Philippine timezone if parse fails
 							location = time.FixedZone("UTC+8", 8*60*60)
 						}
 					}
@@ -623,11 +577,9 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			for _, offer := range element.Promotions.PromotionalOffers {
 				if len(offer.PromotionalOffers) > 0 {
 					for _, promo := range offer.PromotionalOffers {
-						// Check if it's a 100% discount
 						if promo.DiscountSetting.DiscountPercentage == 100 {
 							isCurrentlyFree = true
 							game.Status = "free"
-							// Store original dates
 							game.StartDate = formatDate(promo.StartDate)
 							game.EndDate = formatDate(promo.EndDate)
 							game.DatePrecision = "exact"
@@ -637,16 +589,13 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 
-		// Check upcoming promotions if we include upcoming free games
 		if !isCurrentlyFree && includeUpcoming && len(element.Promotions.UpcomingPromotionalOffers) > 0 {
 			for _, offer := range element.Promotions.UpcomingPromotionalOffers {
 				if len(offer.PromotionalOffers) > 0 {
 					for _, promo := range offer.PromotionalOffers {
-						// Check if it will be a 100% discount
 						if promo.DiscountSetting.DiscountPercentage == 100 {
 							hasUpcomingFree = true
 							game.Status = "coming soon"
-							// Store original dates
 							game.StartDate = formatDate(promo.StartDate)
 							game.EndDate = formatDate(promo.EndDate)
 							game.DatePrecision = "exact"
@@ -656,16 +605,13 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 
-		// Check price if it's 0, it's free
 		if !isCurrentlyFree && !hasUpcomingFree {
 			price := element.Price.TotalPrice.FmtPrice.DiscountPrice
 			if price == "$0.00" || price == "0" || price == "" || strings.Contains(strings.ToLower(price), "free") {
 				game.Status = "free"
 				
-				// Try to load the specified timezone
 				location, err := time.LoadLocation(timezone)
 				if err != nil {
-					// Default to Philippine timezone if loading fails
 					location = time.FixedZone("UTC+8", 8*60*60)
 				}
 				
@@ -683,22 +629,17 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 			}
 		}
 
-		// Skip upcoming games if not requested
 		if !includeUpcoming && game.Status == "coming soon" {
 			continue
 		}
-
-		// Ensure we don't have empty dates for free games by checking again
+		
 		if game.Status == "free" && (game.StartDate == "" && game.EndDate == "" || game.DatePrecision == "estimated") {
 			
-			// Try to extract dates from all promotions as a fallback - look more deeply
 			if len(element.Promotions.PromotionalOffers) > 0 {
 				for _, offer := range element.Promotions.PromotionalOffers {
 					if len(offer.PromotionalOffers) > 0 {
-						// Just use the first promotion's dates if we haven't found a 100% discount
 						promo := offer.PromotionalOffers[0]
 						
-						// Only replace estimated dates if we have actual dates
 						if promo.StartDate != "" && promo.EndDate != "" {
 							game.StartDate = formatDate(promo.StartDate)
 							game.EndDate = formatDate(promo.EndDate)
@@ -709,13 +650,11 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 				}
 			}
 			
-			// Debug: log the game that has estimated dates
 			if game.DatePrecision == "estimated" {
 				log.Printf("Game with estimated dates: %s (Status: %s)", game.Title, game.Status)
 			}
 		}
 
-		// If we still don't have dates, mark it as unknown
 		if game.StartDate == "" && game.EndDate == "" {
 			game.StartDate = "Unknown"
 			game.EndDate = "Unknown"
@@ -728,38 +667,6 @@ func fetchFreeGames(countryCode, locale string, includeUpcoming bool, timezone s
 	return games, nil
 }
 
-// checkURL verifies if a URL is valid by making a HEAD request
-func checkURL(url string) bool {
-	client := &http.Client{
-		Timeout: 5 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			// Allow up to 10 redirects
-			if len(via) >= 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
-	}
-	
-	req, err := http.NewRequest("HEAD", url, nil)
-	if err != nil {
-		return false
-	}
-	
-	// Set user agent to avoid being blocked
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-	
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	
-	// Status codes 200-399 are considered valid
-	return resp.StatusCode >= 200 && resp.StatusCode < 400
-}
-
-// setupCronJob configures and starts a cron job to check for free games on a schedule
 func setupCronJob(schedule, countryCode, locale, timezone, webhookURL string) {
 	if webhookURL == "" {
 		log.Println("Warning: Discord webhook URL not configured. Cron job will run but no notifications will be sent.")
@@ -767,20 +674,17 @@ func setupCronJob(schedule, countryCode, locale, timezone, webhookURL string) {
 
 	c := cron.New(cron.WithSeconds())
 	
-	// Log cron job setup
 	log.Printf("Setting up cron job with schedule: %s", schedule)
 	
-	// Add the cron job
 	_, err := c.AddFunc(schedule, func() {
 		log.Println("Running scheduled free games check...")
 		
-		// Get free games
 		games, err := fetchFreeGames(countryCode, locale, true, timezone)
 		if err != nil {
 			log.Printf("Error fetching free games: %v", err)
 			return
 		}
-		
+			
 		log.Printf("Found %d free game(s)", len(games))
 		
 		// Send notification to Discord if webhook URL is configured
@@ -789,7 +693,7 @@ func setupCronJob(schedule, countryCode, locale, timezone, webhookURL string) {
 			if err != nil {
 				log.Printf("Error sending Discord notification: %v", err)
 			} else {
-				log.Printf("Discord notification sent for %d games", len(games))
+					log.Printf("Discord notification sent for %d games", len(games))
 			}
 		}
 	})
@@ -799,7 +703,6 @@ func setupCronJob(schedule, countryCode, locale, timezone, webhookURL string) {
 		return
 	}
 	
-	// Start the cron scheduler in a separate goroutine
 	c.Start()
 	log.Println("Cron scheduler started")
 }
